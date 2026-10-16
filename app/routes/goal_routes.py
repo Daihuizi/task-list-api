@@ -1,74 +1,101 @@
 from flask import Blueprint, request, Response
+from werkzeug.exceptions import HTTPException
+
 from app.models.goal import Goal
 from app.models.task import Task
 from app.db import db
+from app.routes.route_utilities import create_model, validate_model
+
 
 goals_bp = Blueprint("goals_bp", __name__, url_prefix="/goals")
 
+
+# --------------------------------------------------
+# Shared Goal Validation
+# --------------------------------------------------
+
+def validate_goal(goal_id):
+    # Validate and retrieve a Goal using the shared utility
+    try:
+        return validate_model(Goal, goal_id)
+
+    # Preserve the existing JSON error responses
+    except HTTPException as error:
+        if error.code == 400:
+            return {"message": "Invalid goal ID"}, 400
+
+        if error.code == 404:
+            return {"message": "Goal not found"}, 404
+
+        raise
+
+
+# --------------------------------------------------
+# Create Goal
+# --------------------------------------------------
+
 @goals_bp.post("")
 def create_goal():
-    # Get JSON data from the request
+    # Get the request data
     request_body = request.get_json(silent=True)
 
-    # Validate the required title field
-    if not isinstance(request_body, dict) or "title" not in request_body:
-        return {"details": "Invalid data"}, 400
+    # Create the goal using the shared utility
+    try:
+        return create_model(Goal, request_body)
 
-    # Create a Goal object
-    new_goal = Goal.from_dict(request_body)
+    except HTTPException as error:
+        if error.code == 400:
+            return {"details": "Invalid data"}, 400
 
-    # Save the Goal to the database
-    db.session.add(new_goal)
-    db.session.commit()
+        raise
 
-    # Return the created Goal
-    return new_goal.to_dict(), 201
 
+# --------------------------------------------------
+# Get All Goals
+# --------------------------------------------------
 
 @goals_bp.get("")
 def get_goals():
-    # Get all goals from the database
+    # Retrieve all goals from the database
     goals = db.session.scalars(db.select(Goal)).all()
 
     # Convert each goal to a dictionary
     goals_response = [goal.to_dict() for goal in goals]
 
-    # Return the list of goals
     return goals_response, 200
 
 
+# --------------------------------------------------
+# Get One Goal
+# --------------------------------------------------
+
 @goals_bp.get("/<goal_id>")
 def get_goal(goal_id):
-    # Validate the goal ID
-    try:
-        goal_id = int(goal_id)
-    except ValueError:
-        return {"message": "Invalid goal ID"}, 400
+    # Validate and retrieve the goal
+    result = validate_goal(goal_id)
 
-    # Find the goal in the database
-    goal = db.session.get(Goal, goal_id)
+    # Return the existing error response if validation failed
+    if isinstance(result, tuple):
+        return result
 
-    # Return 404 if the goal does not exist
-    if goal is None:
-        return {"message": "Goal not found"}, 404
+    goal = result
 
-    # Return the goal as JSON
     return goal.to_dict(), 200
+
+
+# --------------------------------------------------
+# Update Goal
+# --------------------------------------------------
 
 @goals_bp.put("/<goal_id>")
 def update_goal(goal_id):
-    # Validate the goal ID
-    try:
-        goal_id = int(goal_id)
-    except ValueError:
-        return {"message": "Invalid goal ID"}, 400
+    # Validate and retrieve the goal
+    result = validate_goal(goal_id)
 
-    # Find the goal in the database
-    goal = db.session.get(Goal, goal_id)
+    if isinstance(result, tuple):
+        return result
 
-    # Return 404 if the goal does not exist
-    if goal is None:
-        return {"message": "Goal not found"}, 404
+    goal = result
 
     # Get the request data
     request_body = request.get_json(silent=True)
@@ -79,75 +106,85 @@ def update_goal(goal_id):
 
     # Update the goal title
     goal.title = request_body["title"]
+
+    # Save changes to the database
     db.session.commit()
 
-    # Return 204 No Content
     return Response(status=204, mimetype="application/json")
+
+
+# --------------------------------------------------
+# Delete Goal
+# --------------------------------------------------
 
 @goals_bp.delete("/<goal_id>")
 def delete_goal(goal_id):
-    # Validate the goal ID
-    try:
-        goal_id = int(goal_id)
-    except ValueError:
-        return {"message": "Invalid goal ID"}, 400
+    # Validate and retrieve the goal
+    result = validate_goal(goal_id)
 
-    # Find the goal in the database
-    goal = db.session.get(Goal, goal_id)
+    if isinstance(result, tuple):
+        return result
 
-    # Return 404 if the goal does not exist
-    if goal is None:
-        return {"message": "Goal not found"}, 404
+    goal = result
 
     # Delete the goal from the database
     db.session.delete(goal)
     db.session.commit()
 
-    # Return 204 No Content
     return Response(status=204, mimetype="application/json")
 
 
+# --------------------------------------------------
+# Add Tasks to Goal
+# --------------------------------------------------
+
 @goals_bp.post("/<goal_id>/tasks")
 def add_tasks_to_goal(goal_id):
-    # Validate the goal ID
-    try:
-        goal_id = int(goal_id)
-    except ValueError:
-        return {"message": "Invalid goal ID"}, 400
+    # Validate and retrieve the goal
+    result = validate_goal(goal_id)
 
-    # Find the goal in the database
-    goal = db.session.get(Goal, goal_id)
+    if isinstance(result, tuple):
+        return result
 
-    # Return 404 if the goal does not exist
-    if goal is None:
-        return {"message": "Goal not found"}, 404
+    goal = result
 
-    # Get the request JSON
+    # Get the request data
     request_body = request.get_json(silent=True)
 
     # Validate the task_ids field
-    if not isinstance(request_body, dict) or not isinstance(request_body.get("task_ids"), list):
+    if (
+        not isinstance(request_body, dict)
+        or not isinstance(request_body.get("task_ids"), list)
+    ):
         return {"details": "Invalid data"}, 400
 
     task_ids = request_body["task_ids"]
 
-    # Find each task and validate its ID
+    # Find and validate each task
     tasks = []
 
     for task_id in task_ids:
         if type(task_id) is not int:
             return {"message": "Invalid task ID"}, 400
 
-        task = db.session.get(Task, task_id)
+        try:
+            task = validate_model(Task, task_id)
 
-        if task is None:
-            return {"message": "Task not found"}, 404
+        except HTTPException as error:
+            if error.code == 400:
+                return {"message": "Invalid task ID"}, 400
+
+            if error.code == 404:
+                return {"message": "Task not found"}, 404
+
+            raise
 
         tasks.append(task)
-     # Replace the goal's existing tasks with the new tasks
+
+    # Replace existing task associations
     goal.tasks = tasks
 
-    # Save the relationship to the database
+    # Save the relationship changes
     db.session.commit()
 
     # Return the goal ID and associated task IDs
@@ -157,28 +194,26 @@ def add_tasks_to_goal(goal_id):
     }, 200
 
 
+# --------------------------------------------------
+# Get Tasks for Goal
+# --------------------------------------------------
 
 @goals_bp.get("/<goal_id>/tasks")
 def get_tasks_for_goal(goal_id):
-    # Validate the goal ID
-    try:
-        goal_id = int(goal_id)
-    except ValueError:
-        return {"message": "Invalid goal ID"}, 400
+    # Validate and retrieve the goal
+    result = validate_goal(goal_id)
 
-    # Find the goal in the database
-    goal = db.session.get(Goal, goal_id)
+    if isinstance(result, tuple):
+        return result
 
-    # Return 404 if the goal does not exist
-    if goal is None:
-        return {"message": "Goal not found"}, 404
+    goal = result
+
     # Convert the goal to a dictionary
     response_body = goal.to_dict()
 
     # Add all associated tasks
-    response_body["tasks"] = [task.to_dict() for task in goal.tasks]
+    response_body["tasks"] = [
+        task.to_dict() for task in goal.tasks
+    ]
 
-    # Return the goal with its tasks
     return response_body, 200
-
-    

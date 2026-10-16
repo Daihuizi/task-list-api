@@ -1,4 +1,6 @@
+from app.routes.route_utilities import create_model, validate_model
 import os
+from werkzeug.exceptions import HTTPException
 import requests
 from flask import Blueprint
 from flask import Blueprint, request, make_response, abort, Response
@@ -11,17 +13,16 @@ tasks_bp = Blueprint("tasks_bp", __name__, url_prefix="/tasks")
 
 @tasks_bp.post("")
 def create_task():
-    request_body = request.get_json()
+    # Get the request data
+    request_body = request.get_json(silent=True)
 
+    # Create the task using the shared utility
     try:
-        new_task = Task.from_dict(request_body)
-    except (KeyError, TypeError):
-        return make_response({"details": "Invalid data"}, 400)
-
-    db.session.add(new_task)
-    db.session.commit()
-
-    return make_response(new_task.to_dict(), 201)
+        return create_model(Task, request_body)
+    except HTTPException as error:
+        if error.code == 400:
+            return make_response({"details": "Invalid data"}, 400)
+        raise
 
 @tasks_bp.get("")
 def get_tasks():
@@ -54,17 +55,15 @@ def get_one_task(task_id):
 
 
 def validate_task(task_id):
+    # Use the shared utility to validate the task
     try:
-        task_id = int(task_id)
-    except ValueError:
-        abort(400, description="Invalid task ID")
-
-    task = db.session.get(Task, task_id)
-
-    if task is None:
-        abort(404, description="Task not found")
-
-    return task
+        return validate_model(Task, task_id)
+    except HTTPException as error:
+        if error.code == 404:
+            abort(404, description="Task not found")
+        if error.code == 400:
+            abort(400, description="Invalid task ID")
+        raise
 
 
 @tasks_bp.put("/<task_id>")
