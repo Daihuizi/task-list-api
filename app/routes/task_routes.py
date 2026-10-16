@@ -1,3 +1,5 @@
+import os
+import requests
 from flask import Blueprint
 from flask import Blueprint, request, make_response, abort, Response
 from app.models.task import Task
@@ -90,16 +92,29 @@ def delete_task(task_id):
 
 @tasks_bp.patch("/<task_id>/mark_complete")
 def mark_complete(task_id):
-    # 1. Find the task or return 404 if it does not exist
+    # 1. Find the task or return 404
     task = validate_task(task_id)
 
-    # 2. Set the completion time to the current datetime
+    # 2. Update the completion time
     task.completed_at = datetime.now()
-
-    # 3. Save the changes to the database
     db.session.commit()
 
-    # 4. Return 204 No Content
+    # 3. Prepare the Slack API request
+    url = "https://slack.com/api/chat.postMessage"
+
+    headers = {
+        "Authorization": f"Bearer {os.environ.get('SLACK_BOT_TOKEN')}"
+    }
+
+    data = {
+        "channel": "task-notifications",
+        "text": f"Someone just completed the task {task.title}"
+    }
+
+    # 4. Send the Slack notification
+    requests.post(url, headers=headers, json=data, timeout=10)
+
+    # 5. Return 204 No Content
     return Response(status=204, mimetype="application/json")
 
 @tasks_bp.patch("/<task_id>/mark_incomplete")
