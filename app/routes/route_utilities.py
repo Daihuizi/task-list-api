@@ -1,37 +1,36 @@
-from flask import abort
+from flask import abort, make_response
 from ..db import db
 
 
-def validate_model(model, model_id):
-    # Check if the ID is a valid integer
+def validate_model(cls, model_id):
     try:
         model_id = int(model_id)
     except (ValueError, TypeError):
-        abort(400, description="Invalid ID")
+        response = {"message": f"{cls.__name__} {model_id} invalid"}
+        abort(make_response(response, 400))
 
-    # Find the model instance in the database
-    instance = db.session.get(model, model_id)
+    query = db.select(cls).where(cls.id == model_id)
+    model = db.session.scalar(query)
 
-    # Return 404 if the instance does not exist
-    if instance is None:
-        abort(404, description="Not found")
+    if not model:
+        response = {"message": f"{cls.__name__} not found"}
+        abort(make_response(response, 404))
 
-    return instance
+    return model
 
-def create_model(model, request_body):
-    # Validate the request body
+
+def create_model(cls, request_body):
     if not isinstance(request_body, dict):
-        abort(400, description="Invalid data")
+        response = {"details": "Invalid data"}
+        abort(make_response(response, 400))
 
-    # Create a model instance
     try:
-        instance = model.from_dict(request_body)
+        model = cls.from_dict(request_body)
     except (KeyError, TypeError, ValueError):
-        abort(400, description="Invalid data")
+        response = {"details": "Invalid data"}
+        abort(make_response(response, 400))
 
-    # Save the instance to the database
-    db.session.add(instance)
+    db.session.add(model)
     db.session.commit()
 
-    # Return the created instance and status code
-    return instance.to_dict(), 201
+    return model.to_dict(), 201
